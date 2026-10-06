@@ -21,10 +21,12 @@ import {
 import { ImportOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useMissionStore } from '../stores/missionStore';
 import { useWaypointStore } from '../stores/waypointStore';
+import { useAssetStore } from '../stores/assetStore';
 import { useRouteMetrics, DEFAULT_ROUTE_PARAMS } from '../hooks/useRouteMetrics';
 import AmapRouteView from '../components/common/AmapRouteView';
 import { WAYPOINT_ACTIONS, parseWaypointText, type Waypoint, type WaypointAction } from '../types/waypoint';
 import { calcGsd, groundCoverage } from '../utils/geoCalc';
+import type { PublishResult } from '../utils/release';
 
 type Columns = NonNullable<TableProps<Waypoint>['columns']>;
 
@@ -32,13 +34,17 @@ type Columns = NonNullable<TableProps<Waypoint>['columns']>;
 export default function WaypointTable() {
   const { id = '' } = useParams();
   const missions = useMissionStore((s) => s.items);
+  const loadMissions = useMissionStore((s) => s.load);
   const waypoints = useWaypointStore((s) => s.items);
+  const loadWaypoints = useWaypointStore((s) => s.load);
   const addMany = useWaypointStore((s) => s.addMany);
   const update = useWaypointStore((s) => s.update);
+  const setAltitudeForMission = useWaypointStore((s) => s.setAltitudeForMission);
   const move = useWaypointStore((s) => s.move);
   const reorder = useWaypointStore((s) => s.reorder);
   const remove = useWaypointStore((s) => s.remove);
   const clearMission = useWaypointStore((s) => s.removeByMission);
+  const loadAssets = useAssetStore((s) => s.load);
 
   const mission = missions.find((m) => m.id === id);
   const rows = useMemo(
@@ -61,6 +67,30 @@ export default function WaypointTable() {
   const preview = rows.find((w) => w.id === previewId) ?? rows[0];
   const metrics = useRouteMetrics(id, { ...DEFAULT_ROUTE_PARAMS, altitude: preview?.altitude ?? 120 });
 
+  /** 冲突 / 失败后从库内同步最新数据 */
+  const syncLatest = async () => {
+    await Promise.all([loadMissions(), loadWaypoints(), loadAssets()]);
+  };
+
+  /** 统一处理发布结果：成功提示；版本冲突被打回则同步最新数据并保留页面输入；写失败提示已回滚 */
+  const handlePublish = (result: PublishResult | null, okText?: string): boolean => {
+    if (result === null) return false;
+    if (result.ok) {
+      setError('');
+      if (okText) setToast(okText);
+      return true;
+    }
+    if (result.reason === 'conflict') {
+      setError(
+        `修改被驳回：该任务已在其他标签页发布 v${result.currentVersion}，本次修改未写入、未覆盖对方内容。已同步最新数据，你的输入保留在页面上，可核对后重试。`,
+      );
+      void syncLatest();
+      return false;
+    }
+    setError(`写入失败，已回滚：${result.message}。原版本与成果影像质量均未改动。`);
+    return false;
+  };
+
   const importPaste = async () => {
     const parsed = parseWaypointText(pasteText);
     if (parsed.length === 0) {
@@ -68,7 +98,7 @@ export default function WaypointTable() {
       return;
     }
     const startSeq = rows.length === 0 ? 1 : Math.max(...rows.map((w) => w.seq)) + 1;
-    await addMany(
+    const result = await addMany(
       parsed.map((p, index) => ({
         missionId: id,
         seq: startSeq + index,
@@ -82,16 +112,15 @@ export default function WaypointTable() {
         hoverSec: 0,
       })),
     );
-    setError('');
-    setToast(`已导入 ${parsed.length} 个航点（序号 ${startSeq} 起）`);
-    setPasteText('');
+    // 仅发布成功才清空粘贴文本；被驳回时保留输入
+    if (handlePublish(result, `已导入 ${parsed.length} 个航点（序号 ${startSeq} 起）`)) {
+      setPasteText('');
+    }
   };
 
   const applyBatchAltitude = async () => {
-    for (const w of rows) {
-      await update(w.id, { altitude: batchAltitude });
-    }
-    setToast(`已把 ${rows.length} 个航点的高度统一改为 ${batchAltitude} m`);
+    const result = await setAltitudeForMission(id, batchAltitude);
+    handlePublish(result, `已把 ${rows.length} 个航点的高度统一改为 ${batchAltitude} m`);
   };
 
   const columns: Columns = [
@@ -102,28 +131,28 @@ export default function WaypointTable() {
       title: '相对航高 m',
       width: 140,
       render: (_: unknown, row: Waypoint) => (
-        <InputNumber size="small" min={20} max={600} value={row.altitude} onChange={(v) => update(row.id, { altitude: Number(v ?? 0) })} />
+        <InputNumber size="small" min={20} max={600} value={row.altitude} onChange={(v) => void update(row.id, { altitude: Number(v ?? 0) }).then(handlePublish)} />
       ),
     },
     {
       title: '航速 m/s',
       width: 120,
       render: (_: unknown, row: Waypoint) => (
-        <InputNumber size="small" min={1} max={25} step={0.5} value={row.speed} onChange={(v) => update(row.id, { speed: Number(v ?? 0) })} />
+        <InputNumber size="small" min={1} max={25} step={0.5} value={row.speed} onChange={(v) => void update(row.id, { speed: Number(v ?? 0) }).then(handlePublish)} />
       ),
     },
     {
       title: '航向 °',
       width: 120,
       render: (_: unknown, row: Waypoint) => (
-        <InputNumber size="small" min={0} max={360} value={row.heading} onChange={(v) => update(row.id, { heading: Number(v ?? 0) })} />
+        <InputNumber size="small" min={0} max={360} value={row.heading} onChange={(v) => void update(row.id, { heading: Number(v ?? 0) }).then(handlePublish)} />
       ),
     },
     {
       title: '云台俯仰 °',
       width: 130,
       render: (_: unknown, row: Waypoint) => (
-        <InputNumber size="small" min={-90} max={30} value={row.gimbalPitch} onChange={(v) => update(row.id, { gimbalPitch: Number(v ?? 0) })} />
+        <InputNumber size="small" min={-90} max={30} value={row.gimbalPitch} onChange={(v) => void update(row.id, { gimbalPitch: Number(v ?? 0) }).then(handlePublish)} />
       ),
     },
     {
@@ -134,7 +163,7 @@ export default function WaypointTable() {
           size="small"
           style={{ width: 100 }}
           value={row.action}
-          onChange={(v) => update(row.id, { action: v as WaypointAction })}
+          onChange={(v) => void update(row.id, { action: v as WaypointAction }).then(handlePublish)}
           options={WAYPOINT_ACTIONS.map((a) => ({ value: a, label: a }))}
         />
       ),
@@ -143,7 +172,7 @@ export default function WaypointTable() {
       title: '悬停 s',
       width: 110,
       render: (_: unknown, row: Waypoint) => (
-        <InputNumber size="small" min={0} max={300} value={row.hoverSec} onChange={(v) => update(row.id, { hoverSec: Number(v ?? 0) })} />
+        <InputNumber size="small" min={0} max={300} value={row.hoverSec} onChange={(v) => void update(row.id, { hoverSec: Number(v ?? 0) }).then(handlePublish)} />
       ),
     },
     {
@@ -169,10 +198,10 @@ export default function WaypointTable() {
       width: 210,
       render: (_: unknown, row: Waypoint, index: number) => (
         <Space size={4}>
-          <Button size="small" disabled={index === 0} onClick={() => move(row.id, 'up')}>
+          <Button size="small" disabled={index === 0} onClick={() => void move(row.id, 'up').then(handlePublish)}>
             上移
           </Button>
-          <Button size="small" disabled={index === rows.length - 1} onClick={() => move(row.id, 'down')}>
+          <Button size="small" disabled={index === rows.length - 1} onClick={() => void move(row.id, 'down').then(handlePublish)}>
             下移
           </Button>
           <span
@@ -181,7 +210,7 @@ export default function WaypointTable() {
             style={{ cursor: 'grab', color: '#97a0ad' }}
             onDragStart={() => setPreviewId(row.id)}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={() => reorder(row.id, previewId)}
+            onDrop={() => void reorder(row.id, previewId).then(handlePublish)}
           >
             ⣿
           </span>
@@ -196,7 +225,7 @@ export default function WaypointTable() {
           <Button size="small" onClick={() => setPreviewId(row.id)}>
             预览视场
           </Button>
-          <Button size="small" danger onClick={() => remove(row.id)}>
+          <Button size="small" danger onClick={() => void remove(row.id).then(handlePublish)}>
             删除
           </Button>
         </Space>
@@ -220,6 +249,7 @@ export default function WaypointTable() {
           航点明细 · {mission.missionNo}
         </Typography.Title>
         <Tag color="green">航点 {rows.length} 个</Tag>
+        <Tag color="blue">版本 v{mission.version}</Tag>
         <Tag>传感器 {mission.sensorWidth}×{mission.sensorHeight} mm / f{mission.focalLength} mm</Tag>
         <div style={{ flex: 1 }} />
         <Button type="link">
@@ -228,7 +258,7 @@ export default function WaypointTable() {
         <Button type="link">
           <Link to={`/missions/${mission.id}/assets`}>成果编目</Link>
         </Button>
-        <Button danger size="small" onClick={() => clearMission(mission.id)}>
+        <Button danger size="small" onClick={() => void clearMission(mission.id).then((r) => handlePublish(r, '已清空本任务航点'))}>
           清空本任务航点
         </Button>
       </Space>

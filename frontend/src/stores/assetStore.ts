@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { db } from '../utils/db';
 import { newId } from '../utils/id';
+import { confirmMissionAssets, notifyMissionSync } from '../utils/release';
 import { makeThumbDataUrl, type AssetThumb, type ImageAsset, type ImageAssetDraft, type ImageQuality } from '../types/imageasset';
 
 interface AssetState {
@@ -12,6 +13,10 @@ interface AssetState {
   update: (id: string, patch: Partial<ImageAsset>) => Promise<void>;
   markMany: (ids: string[], quality: ImageQuality) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
+  /** 发布成功后把本任务成果在本地标为待复核（库内写入已在发布事务中完成） */
+  markMissionPendingReview: (missionId: string) => void;
+  /** 重新确认：待复核成果按当前版本标回已确认，恢复导出 */
+  confirmMission: (missionId: string) => Promise<{ ok: boolean; confirmed: number; version: number }>;
   byMission: (missionId: string) => ImageAsset[];
   qualityStats: (missionId: string) => { quality: ImageQuality; count: number }[];
 }
@@ -31,7 +36,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     set({ items: rows, thumbs, loaded: true });
   },
   async addMany(drafts) {
-    const records: ImageAsset[] = drafts.map((d) => ({ ...d, id: newId('asset') }));
+    const records: ImageAsset[] = drafts.map((d) => ({ ...d, id: newId('asset'), reviewStatus: '已确认' as const }));
     const thumbRecords: AssetThumb[] = records.map((r) => ({
       id: r.id,
       missionId: r.missionId,
@@ -65,6 +70,25 @@ export const useAssetStore = create<AssetState>((set, get) => ({
       delete nextThumbs[id];
     });
     set({ items: get().items.filter((it) => !ids.includes(it.id)), thumbs: nextThumbs });
+  },
+  markMissionPendingReview(missionId) {
+    set({
+      items: get().items.map((it) => (it.missionId === missionId ? { ...it, reviewStatus: '待复核' as const } : it)),
+    });
+  },
+  async confirmMission(missionId) {
+    const result = await confirmMissionAssets(missionId);
+    if (result.ok) {
+      set({
+        items: get().items.map((it) =>
+          it.missionId === missionId && it.reviewStatus === '待复核'
+            ? { ...it, reviewStatus: '已确认' as const, confirmedVersion: result.version }
+            : it,
+        ),
+      });
+      notifyMissionSync({ type: 'assets-confirmed', missionId, version: result.version });
+    }
+    return result;
   },
   byMission(missionId) {
     return get().items.filter((it) => it.missionId === missionId);

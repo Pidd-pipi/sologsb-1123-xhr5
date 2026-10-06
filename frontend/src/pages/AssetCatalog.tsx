@@ -13,7 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { DownloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMissionStore } from '../stores/missionStore';
 import { useWaypointStore } from '../stores/waypointStore';
 import { useAssetStore } from '../stores/assetStore';
@@ -32,6 +32,7 @@ export default function AssetCatalog() {
   const addMany = useAssetStore((s) => s.addMany);
   const markMany = useAssetStore((s) => s.markMany);
   const removeMany = useAssetStore((s) => s.removeMany);
+  const confirmMission = useAssetStore((s) => s.confirmMission);
 
   const mission = missions.find((m) => m.id === id);
   const missionAssets = useMemo(
@@ -42,6 +43,9 @@ export default function AssetCatalog() {
     () => waypoints.filter((w) => w.missionId === id).sort((a, b) => a.seq - b.seq),
     [waypoints, id],
   );
+  /** 参数 / 航点发布后待复核的成果：暂停导出，重新确认后恢复 */
+  const pendingReview = useMemo(() => missionAssets.filter((a) => a.reviewStatus === '待复核'), [missionAssets]);
+  const exportBlocked = pendingReview.length > 0;
 
   const [selected, setSelected] = useState<string[]>([]);
   const [keyword, setKeyword] = useState('');
@@ -110,6 +114,10 @@ export default function AssetCatalog() {
   };
 
   const exportList = () => {
+    if (exportBlocked) {
+      setError(`有 ${pendingReview.length} 张成果待复核，导出已暂停，请先「重新确认成果」`);
+      return;
+    }
     const header = '片号,经度,纬度,航高m,GSDcm/px,重叠%,倾角°,质量,归档目录';
     const lines = missionAssets.map((a) =>
       [a.imageNo, a.lng, a.lat, a.altitude, a.gsd, a.overlap, a.tiltAngle, a.quality, a.folder].join(','),
@@ -122,6 +130,18 @@ export default function AssetCatalog() {
     a.click();
     URL.revokeObjectURL(url);
     setToast(`已导出 ${lines.length} 条影像清单`);
+  };
+
+  /** 重新确认：待复核成果按当前版本标回已确认，恢复导出 */
+  const reconfirm = async () => {
+    if (!mission) return;
+    const result = await confirmMission(mission.id);
+    if (result.ok) {
+      setError('');
+      setToast(`已按当前版本 v${result.version} 重新确认 ${result.confirmed} 张成果影像，导出已恢复`);
+    } else {
+      setError('重新确认失败，请重试（成果状态未改动）');
+    }
   };
 
   if (!mission) {
@@ -141,6 +161,8 @@ export default function AssetCatalog() {
         </Typography.Title>
         <Tag color="cyan">{mission.purpose}</Tag>
         <Tag>条目 {missionAssets.length} 张</Tag>
+        <Tag color="blue">版本 v{mission.version}</Tag>
+        {exportBlocked ? <Tag color="orange">待复核 {pendingReview.length} 张 · 导出暂停</Tag> : null}
         <div style={{ flex: 1 }} />
         <Button type="link">
           <Link to={`/missions/${mission.id}/route`}>航线规划</Link>
@@ -155,6 +177,19 @@ export default function AssetCatalog() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {exportBlocked ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={`航线参数或航点已变更（当前版本 v${mission.version}），${pendingReview.length} 张已编目成果待复核，导出已暂停`}
+          description="核对成果与最新航线参数一致后，点击「重新确认成果」恢复导出；质量标记在复核期间保持不变。"
+          action={
+            <Button size="small" type="primary" icon={<SafetyCertificateOutlined />} onClick={reconfirm}>
+              重新确认成果
+            </Button>
+          }
+        />
+      ) : null}
 
       <Row gutter={12}>
         {stats.map((s) => (
@@ -227,7 +262,19 @@ export default function AssetCatalog() {
           >
             删除选中
           </Button>
-          <Button icon={<DownloadOutlined />} onClick={exportList} disabled={missionAssets.length === 0}>
+          <Button
+            icon={<SafetyCertificateOutlined />}
+            disabled={!exportBlocked}
+            onClick={reconfirm}
+          >
+            重新确认成果
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={exportList}
+            disabled={missionAssets.length === 0 || exportBlocked}
+            title={exportBlocked ? '成果待复核，导出已暂停' : undefined}
+          >
             导出成果清单
           </Button>
         </Space>

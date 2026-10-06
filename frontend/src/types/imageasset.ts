@@ -3,6 +3,11 @@ export type ImageQuality = '合格' | '模糊' | '过曝';
 
 export const IMAGE_QUALITIES: ImageQuality[] = ['合格', '模糊', '过曝'];
 
+/** 成果复核状态：航线参数 / 航点发布后转为待复核并暂停导出，重新确认后恢复 */
+export type ReviewStatus = '已确认' | '待复核';
+
+export const REVIEW_STATUSES: ReviewStatus[] = ['已确认', '待复核'];
+
 /** 成果影像条目 */
 export interface ImageAsset {
   id: string;
@@ -21,11 +26,15 @@ export interface ImageAsset {
   tiltAngle: number;
   shotAt: number;
   quality: ImageQuality;
+  /** 复核状态（与任务发布版本联动） */
+  reviewStatus: ReviewStatus;
+  /** 最近一次重新确认时的任务版本 */
+  confirmedVersion?: number;
   /** 归档目录 */
   folder: string;
 }
 
-export type ImageAssetDraft = Omit<ImageAsset, 'id'>;
+export type ImageAssetDraft = Omit<ImageAsset, 'id' | 'reviewStatus' | 'confirmedVersion'>;
 
 /** 缩略图（单独建表存放 dataUrl） */
 export interface AssetThumb {

@@ -32,6 +32,7 @@ export default function MissionCard({ mission, waypointCount, assetCount, lineCo
           <span data-testid={`mission-card-${mission.missionNo}`}>{mission.missionNo}</span>
           <Tag color={STATUS_COLOR[mission.status]}>{mission.status}</Tag>
           <Tag color="cyan">{mission.purpose}</Tag>
+          <Tag color="blue">v{mission.version}</Tag>
         </Space>
       }
     >

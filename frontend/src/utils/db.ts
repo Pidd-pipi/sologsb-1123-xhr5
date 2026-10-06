@@ -2,11 +2,12 @@ import Dexie, { type Table } from 'dexie';
 import type { CameraPreset, Mission } from '../types/mission';
 import type { Waypoint } from '../types/waypoint';
 import type { FlightLine } from '../types/flightline';
+import type { MissionRelease } from '../types/release';
 import { makeThumbDataUrl, type AssetThumb, type ImageAsset } from '../types/imageasset';
 import { newId } from './id';
 
 export const DB_NAME = 'gbdronemap';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const LS_VERSION_KEY = 'gbdronemap:db-version';
 
 class DroneMapDB extends Dexie {
@@ -16,6 +17,7 @@ class DroneMapDB extends Dexie {
   assets!: Table<ImageAsset, string>;
   thumbs!: Table<AssetThumb, string>;
   presets!: Table<CameraPreset, string>;
+  releases!: Table<MissionRelease, string>;
 
   constructor() {
     super(DB_NAME);
@@ -53,6 +55,31 @@ class DroneMapDB extends Dexie {
           .modify((row: any) => {
             if (row.updatedAt === undefined) row.updatedAt = Date.now();
             if (row.batteryCount === undefined) row.batteryCount = 1;
+          });
+      });
+    this.version(3)
+      .stores({
+        missions: 'id, missionNo, areaName, droneModel, flightDate, status, purpose, createdAt, version',
+        waypoints: 'id, missionId, seq, action, altitude',
+        lines: 'id, missionId, lineNo, updatedAt',
+        assets: 'id, missionId, imageNo, quality, shotAt, reviewStatus',
+        thumbs: 'id, missionId',
+        presets: 'id, name, cameraModel',
+        releases: 'id, missionId, version, createdAt',
+      })
+      .upgrade(async (tx) => {
+        // 旧任务升级后补发布版本 0；已编目成果默认「已确认」，不影响导出
+        await tx
+          .table('missions')
+          .toCollection()
+          .modify((row: any) => {
+            if (row.version === undefined) row.version = 0;
+          });
+        await tx
+          .table('assets')
+          .toCollection()
+          .modify((row: any) => {
+            if (!row.reviewStatus) row.reviewStatus = '已确认';
           });
       });
   }
@@ -141,6 +168,7 @@ export async function ensureSeedData(): Promise<void> {
       flightDate: '2024-09-12',
       pilot: '穆清和',
       status: '已飞行',
+      version: 0,
       createdAt: now - 30 * day,
     },
     {
@@ -159,6 +187,7 @@ export async function ensureSeedData(): Promise<void> {
       flightDate: '2024-09-20',
       pilot: '纪长风',
       status: '待飞行',
+      version: 0,
       createdAt: now - 8 * day,
     },
   ];
@@ -252,6 +281,7 @@ export async function ensureSeedData(): Promise<void> {
       tiltAngle: 2 + index,
       shotAt: now - 30 * day + index * 12000,
       quality,
+      reviewStatus: '已确认',
       folder: `/DM-2024-018/100MEDIA`,
     });
     thumbs.push({ id, missionId: missionA, dataUrl: makeThumbDataUrl(`IMG_${1001 + index}`, quality, lng, lat) });
@@ -287,8 +317,8 @@ export async function ensureSeedData(): Promise<void> {
     },
   ];
 
-  // 六张表超过 Dexie 位置参数上限，改用数组形式声明事务范围
-  await db.transaction('rw', [db.missions, db.waypoints, db.lines, db.assets, db.thumbs, db.presets], async () => {
+  // 七张表超过 Dexie 位置参数上限，改用数组形式声明事务范围
+  await db.transaction('rw', [db.missions, db.waypoints, db.lines, db.assets, db.thumbs, db.presets, db.releases], async () => {
     await db.missions.bulkPut(missions);
     await db.waypoints.bulkPut(waypoints);
     await db.lines.bulkPut(lines);

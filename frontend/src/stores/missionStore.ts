@@ -12,6 +12,8 @@ interface MissionState {
   update: (id: string, patch: Partial<Mission>) => Promise<void>;
   setStatus: (id: string, status: MissionStatus) => Promise<void>;
   applyPreset: (missionId: string, presetId: string) => Promise<void>;
+  /** 发布成功后把新版本号同步到本地状态（库内写入已在发布事务中完成） */
+  applyVersion: (id: string, version: number) => void;
   addPreset: (draft: Omit<CameraPreset, 'id'>) => Promise<CameraPreset>;
   removePreset: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -27,7 +29,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     set({ items: rows, presets, loaded: true });
   },
   async add(draft) {
-    const record: Mission = { ...draft, id: newId('mission'), createdAt: Date.now() };
+    const record: Mission = { ...draft, id: newId('mission'), version: 0, createdAt: Date.now() };
     await db.missions.put(record);
     set({ items: [record, ...get().items] });
     return record;
@@ -38,6 +40,9 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   },
   async setStatus(id, status) {
     await get().update(id, { status });
+  },
+  applyVersion(id, version) {
+    set({ items: get().items.map((it) => (it.id === id ? { ...it, version } : it)) });
   },
   async applyPreset(missionId, presetId) {
     const preset = get().presets.find((p) => p.id === presetId);

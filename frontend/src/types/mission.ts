@@ -34,10 +34,12 @@ export interface Mission {
   flightDate: string;
   pilot: string;
   status: MissionStatus;
+  /** 发布版本号：航线参数 / 航点每次发布 +1，旧任务迁移补 0 */
+  version: number;
   createdAt: number;
 }
 
-export type MissionDraft = Omit<Mission, 'id' | 'createdAt'>;
+export type MissionDraft = Omit<Mission, 'id' | 'createdAt' | 'version'>;
 
 /** 相机预设 */
 export interface CameraPreset {

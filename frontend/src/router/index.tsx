@@ -6,6 +6,7 @@ import { useMissionStore } from '../stores/missionStore';
 import { useWaypointStore } from '../stores/waypointStore';
 import { useAssetStore } from '../stores/assetStore';
 import { ensureSeedData, markDbVersion, readDbVersion } from '../utils/db';
+import { onMissionSync } from '../utils/release';
 import { hasAmapKey } from '../utils/amapLoader';
 import MissionList from '../pages/MissionList';
 import RoutePlanner from '../pages/RoutePlanner';
@@ -100,6 +101,15 @@ export default function AppRouter() {
       alive = false;
     };
   }, [loadMissions, loadWaypoints, loadAssets]);
+
+  // 其他标签页发布新版本 / 重新确认成果后，重载本地数据（落后的一侧据此提示「已被修改」）
+  useEffect(
+    () =>
+      onMissionSync(() => {
+        void Promise.all([loadMissions(), loadWaypoints(), loadAssets()]);
+      }),
+    [loadMissions, loadWaypoints, loadAssets],
+  );
 
   if (!ready) {
     return (
