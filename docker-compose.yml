@@ -1,0 +1,9 @@
+name: gbdronemap
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: ${COMPOSE_PROJECT_NAME:-gbdronemap}-frontend
+    ports:
+      - "${FRONTEND_PORT:-21823}:80"
+    restart: unless-stopped

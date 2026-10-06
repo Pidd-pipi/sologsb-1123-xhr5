@@ -1,0 +1,9 @@
+body {
+  margin: 0;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #f4f6f9;
+}
+
+.app-content {
+  padding: 16px 20px 40px;
+}
