@@ -26,6 +26,7 @@ import { calcGsd, distanceMeters } from '../utils/geoCalc';
 export default function AssetCatalog() {
   const { id = '' } = useParams();
   const missions = useMissionStore((s) => s.items);
+  const confirmReview = useMissionStore((s) => s.confirmReview);
   const waypoints = useWaypointStore((s) => s.items);
   const assets = useAssetStore((s) => s.items);
   const thumbs = useAssetStore((s) => s.thumbs);
@@ -34,6 +35,7 @@ export default function AssetCatalog() {
   const removeMany = useAssetStore((s) => s.removeMany);
 
   const mission = missions.find((m) => m.id === id);
+  const reviewPending = mission?.reviewPending ?? false;
   const missionAssets = useMemo(
     () => assets.filter((a) => a.missionId === id).sort((a, b) => a.imageNo.localeCompare(b.imageNo, 'zh-Hans-CN', { numeric: true })),
     [assets, id],
@@ -88,10 +90,13 @@ export default function AssetCatalog() {
       shotAt: Date.now() + index * 1000,
       quality: '合格' as ImageQuality,
       folder: `/${mission.missionNo}/100MEDIA`,
+      reviewStatus: 'confirmed',
     }));
     await addMany(drafts);
+    // 按当前航点重新编目即完成复核：解除待复核、恢复导出
+    await confirmReview(mission.id);
     setError('');
-    setToast(`已按 ${drafts.length} 个航点批量编目影像条目（GSD ${gsd} cm/px）`);
+    setToast(`已按 ${drafts.length} 个航点批量编目影像条目（GSD ${gsd} cm/px），成果已复核，导出已恢复`);
   };
 
   const locate = (asset: ImageAsset) => {
@@ -155,6 +160,19 @@ export default function AssetCatalog() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {reviewPending ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="航线参数或航点已变更，成果影像标为待复核，导出已暂停"
+          description="请核对下方影像与最新航线参数/航点是否一致；确认无误后点击「重新确认并恢复导出」，或按当前航点重新批量编目。"
+          action={
+            <Button size="small" type="primary" onClick={() => mission && void confirmReview(mission.id)}>
+              重新确认并恢复导出
+            </Button>
+          }
+        />
+      ) : null}
 
       <Row gutter={12}>
         {stats.map((s) => (
@@ -227,7 +245,12 @@ export default function AssetCatalog() {
           >
             删除选中
           </Button>
-          <Button icon={<DownloadOutlined />} onClick={exportList} disabled={missionAssets.length === 0}>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={exportList}
+            disabled={missionAssets.length === 0 || reviewPending}
+            title={reviewPending ? '成果待复核：航线参数或航点已变更，请重新确认后再导出' : undefined}
+          >
             导出成果清单
           </Button>
         </Space>

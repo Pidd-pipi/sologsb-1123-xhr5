@@ -31,7 +31,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     set({ items: rows, thumbs, loaded: true });
   },
   async addMany(drafts) {
-    const records: ImageAsset[] = drafts.map((d) => ({ ...d, id: newId('asset') }));
+    const records: ImageAsset[] = drafts.map((d) => ({ ...d, id: newId('asset'), reviewStatus: d.reviewStatus ?? 'confirmed' }));
     const thumbRecords: AssetThumb[] = records.map((r) => ({
       id: r.id,
       missionId: r.missionId,

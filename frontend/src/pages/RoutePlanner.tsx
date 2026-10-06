@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Col, Row, Space, Table, Tag, Typography, type TableProps } from 'antd';
 import { useMissionStore } from '../stores/missionStore';
@@ -6,7 +6,7 @@ import { useWaypointStore } from '../stores/waypointStore';
 import { useRouteMetrics, DEFAULT_ROUTE_PARAMS, type RouteParams } from '../hooks/useRouteMetrics';
 import AmapRouteView from '../components/common/AmapRouteView';
 import OverlapCalcPanel from '../components/common/OverlapCalcPanel';
-import { loadFlightLine, saveFlightLine, splitSorties } from '../utils/db';
+import { loadFlightLine, splitSorties } from '../utils/db';
 import { newId } from '../utils/id';
 import type { FlightLine } from '../types/flightline';
 import type { Waypoint } from '../types/waypoint';
@@ -22,6 +22,8 @@ const lineColumns: NonNullable<TableProps<LineRow>['columns']> = [
 export default function RoutePlanner() {
   const { id = '' } = useParams();
   const missions = useMissionStore((s) => s.items);
+  const publish = useMissionStore((s) => s.publish);
+  const saveRouteParams = useMissionStore((s) => s.saveRouteParams);
   const waypoints = useWaypointStore((s) => s.items);
   const addWaypoint = useWaypointStore((s) => s.add);
   const mission = missions.find((m) => m.id === id);
@@ -30,15 +32,30 @@ export default function RoutePlanner() {
     [waypoints, id],
   );
 
+  // 该标签页编辑时的基线版本：发布前核对，落后则打回且保留输入
+  const baseVersion = useRef<{ id: string; version: number } | null>(null);
+  if (mission && (baseVersion.current === null || baseVersion.current.id !== id)) {
+    baseVersion.current = { id, version: mission.version };
+  }
+  const isStale =
+    mission !== undefined && baseVersion.current !== null && mission.version !== baseVersion.current.version;
+
   const [params, setParams] = useState<RouteParams>({ ...DEFAULT_ROUTE_PARAMS });
   const [savedText, setSavedText] = useState('');
   const [error, setError] = useState('');
+  const [staleNotice, setStaleNotice] = useState('');
+  const lineId = useRef<string | null>(null);
   const metrics = useRouteMetrics(id, params);
 
+  // 每个任务只初始化一次表单：跨标签页同步会重拉 waypoints，不能因此覆盖用户正在编辑的输入
+  const initializedForId = useRef<string | null>(null);
   useEffect(() => {
-    if (!id) return;
+    if (!id || initializedForId.current === id) return;
+    if (missionWaypoints.length === 0) return; // 等航点到达后再初始化航高
+    initializedForId.current = id;
     void loadFlightLine(id).then((line) => {
       if (!line) return;
+      lineId.current = line.id;
       setParams((prev) => ({
         ...prev,
         altitude: missionWaypoints[0]?.altitude ?? prev.altitude,
@@ -48,33 +65,63 @@ export default function RoutePlanner() {
       }));
       setSavedText(`上次保存：${new Date(line.updatedAt).toLocaleString('zh-CN')}`);
     });
+    // missionWaypoints 仅用于初始化航高，不作为依赖以免同步时覆盖输入
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, missionWaypoints.length]);
 
-  useEffect(() => {
-    if (missionWaypoints.length > 0) {
-      setParams((prev) => ({ ...prev, altitude: missionWaypoints[0].altitude }));
-    }
-  }, [missionWaypoints.length]);
+  const buildLine = (): FlightLine => ({
+    id: lineId.current ?? newId('line'),
+    missionId: mission!.id,
+    lineNo: 1,
+    spacing: metrics.spacing,
+    photoInterval: metrics.photoInterval,
+    overlapForward: params.overlapForward,
+    overlapSide: params.overlapSide,
+    gsd: metrics.gsd,
+    estPhotos: metrics.estPhotos,
+    estDuration: metrics.estDuration,
+    batteryCount: metrics.batteryCount,
+    heading: params.heading,
+    updatedAt: Date.now(),
+  });
 
+  /** 保存航线参数（核对版本）：保存后成果标待复核，导出暂停 */
   const onSave = async () => {
-    if (!mission) return;
-    const line: FlightLine = {
-      id: newId('line'),
-      missionId: mission.id,
-      lineNo: 1,
-      spacing: metrics.spacing,
-      photoInterval: metrics.photoInterval,
-      overlapForward: params.overlapForward,
-      overlapSide: params.overlapSide,
-      gsd: metrics.gsd,
-      estPhotos: metrics.estPhotos,
-      estDuration: metrics.estDuration,
-      batteryCount: metrics.batteryCount,
-      heading: params.heading,
-      updatedAt: Date.now(),
-    };
-    await saveFlightLine(line);
-    setSavedText(`已保存 ${new Date(line.updatedAt).toLocaleString('zh-CN')}`);
+    if (!mission || baseVersion.current === null) return;
+    const line = buildLine();
+    const result = await saveRouteParams(mission.id, baseVersion.current.version, line);
+    if (result.ok) {
+      lineId.current = line.id;
+      baseVersion.current = { id, version: result.version as number };
+      setStaleNotice('');
+      setSavedText(`已保存 v${result.version} · ${new Date(line.updatedAt).toLocaleString('zh-CN')} · 成果待复核`);
+    } else if (result.error) {
+      setStaleNotice('写入失败，已回滚：原版本、航线参数与影像质量均未改动，请重试。');
+    } else {
+      // 后到版本被打回：保留输入，不覆盖原内容
+      setStaleNotice(
+        `该任务已被其他标签页发布为 v${result.currentVersion}，您的航线参数输入已保留但未覆盖原内容。请刷新页面后重新编辑。`,
+      );
+    }
+  };
+
+  /** 发布新版本（核对版本）：版本 +1，解除待复核，恢复导出 */
+  const onPublish = async () => {
+    if (!mission || baseVersion.current === null) return;
+    const line = buildLine();
+    const result = await publish(mission.id, baseVersion.current.version, line);
+    if (result.ok) {
+      lineId.current = line.id;
+      baseVersion.current = { id, version: result.version as number };
+      setStaleNotice('');
+      setSavedText(`已发布 v${result.version} · ${new Date(line.updatedAt).toLocaleString('zh-CN')}`);
+    } else if (result.error) {
+      setStaleNotice('写入失败，已回滚：原版本、航线参数与影像质量均未改动，请重试。');
+    } else {
+      setStaleNotice(
+        `该任务已被其他标签页发布为 v${result.currentVersion}，您的航线参数输入已保留但未覆盖原内容。请刷新页面后重新编辑。`,
+      );
+    }
   };
 
   const pickPoint = async (lng: number, lat: number) => {
@@ -127,6 +174,7 @@ export default function RoutePlanner() {
           航线规划 · {mission.missionNo}
         </Typography.Title>
         <Tag color="cyan">{mission.purpose}</Tag>
+        <Tag>v{mission.version}</Tag>
         <Tag>{mission.areaName}</Tag>
         <Tag color={missionWaypoints.length > 0 ? 'green' : 'default'}>航点 {missionWaypoints.length} 个</Tag>
         <div style={{ flex: 1 }} />
@@ -145,6 +193,16 @@ export default function RoutePlanner() {
       </Space>
 
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {staleNotice ? (
+        <Alert type="warning" showIcon message={staleNotice} closable onClose={() => setStaleNotice('')} />
+      ) : null}
+      {isStale && !staleNotice ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`检测到其他标签页已将任务更新到 v${mission.version}，当前标签页仍基于 v${baseVersion.current}。发布将被打回，输入不会丢失。`}
+        />
+      ) : null}
 
       <Row gutter={14}>
         <Col span={15}>
@@ -196,6 +254,7 @@ export default function RoutePlanner() {
             onChange={(patch) => setParams((prev) => ({ ...prev, ...patch }))}
             metrics={metrics}
             onSave={onSave}
+            onPublish={onPublish}
             savedText={savedText}
           />
         </Col>

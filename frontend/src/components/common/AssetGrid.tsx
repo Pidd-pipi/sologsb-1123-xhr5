@@ -75,7 +75,8 @@ export default function AssetGrid({
                 <div style={{ position: 'absolute', top: 4, left: 4 }}>
                   <Checkbox checked={selected} onChange={() => onToggle(asset.id)} />
                 </div>
-                <div style={{ position: 'absolute', top: 4, right: 4 }}>
+                <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 4 }}>
+                  {asset.reviewStatus === 'pending' ? <Tag color="warning">待复核</Tag> : null}
                   <Tag color={QUALITY_COLOR[asset.quality]}>{asset.quality}</Tag>
                 </div>
               </div>

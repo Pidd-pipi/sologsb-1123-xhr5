@@ -6,7 +6,7 @@ import { makeThumbDataUrl, type AssetThumb, type ImageAsset } from '../types/ima
 import { newId } from './id';
 
 export const DB_NAME = 'gbdronemap';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const LS_VERSION_KEY = 'gbdronemap:db-version';
 
 class DroneMapDB extends Dexie {
@@ -55,6 +55,24 @@ class DroneMapDB extends Dexie {
             if (row.batteryCount === undefined) row.batteryCount = 1;
           });
       });
+    // v2 → v3：为老任务补版本 0 与复核状态，为成果补 reviewStatus
+    this.version(3).upgrade(async (tx) => {
+      await tx
+        .table('missions')
+        .toCollection()
+        .modify((row: any) => {
+          if (row.version === undefined) row.version = 0;
+          if (row.reviewPending === undefined) row.reviewPending = false;
+          if (row.routeUpdatedAt === undefined) row.routeUpdatedAt = row.createdAt ?? Date.now();
+          if (row.reviewConfirmedAt === undefined) row.reviewConfirmedAt = row.createdAt ?? Date.now();
+        });
+      await tx
+        .table('assets')
+        .toCollection()
+        .modify((row: any) => {
+          if (row.reviewStatus === undefined) row.reviewStatus = 'confirmed';
+        });
+    });
   }
 }
 
@@ -142,6 +160,10 @@ export async function ensureSeedData(): Promise<void> {
       pilot: '穆清和',
       status: '已飞行',
       createdAt: now - 30 * day,
+      version: 0,
+      reviewPending: false,
+      routeUpdatedAt: now - 30 * day,
+      reviewConfirmedAt: now - 30 * day,
     },
     {
       id: missionB,
@@ -160,6 +182,10 @@ export async function ensureSeedData(): Promise<void> {
       pilot: '纪长风',
       status: '待飞行',
       createdAt: now - 8 * day,
+      version: 0,
+      reviewPending: false,
+      routeUpdatedAt: now - 8 * day,
+      reviewConfirmedAt: now - 8 * day,
     },
   ];
 
@@ -253,6 +279,7 @@ export async function ensureSeedData(): Promise<void> {
       shotAt: now - 30 * day + index * 12000,
       quality,
       folder: `/DM-2024-018/100MEDIA`,
+      reviewStatus: 'confirmed',
     });
     thumbs.push({ id, missionId: missionA, dataUrl: makeThumbDataUrl(`IMG_${1001 + index}`, quality, lng, lat) });
   });

@@ -32,6 +32,8 @@ export default function MissionCard({ mission, waypointCount, assetCount, lineCo
           <span data-testid={`mission-card-${mission.missionNo}`}>{mission.missionNo}</span>
           <Tag color={STATUS_COLOR[mission.status]}>{mission.status}</Tag>
           <Tag color="cyan">{mission.purpose}</Tag>
+          <Tag>v{mission.version}</Tag>
+          {mission.reviewPending ? <Tag color="warning">待复核</Tag> : null}
         </Space>
       }
     >

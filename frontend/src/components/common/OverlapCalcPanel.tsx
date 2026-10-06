@@ -7,6 +7,7 @@ export interface OverlapCalcPanelProps {
   onChange: (patch: Partial<RouteParams>) => void;
   metrics: RouteMetrics;
   onSave?: () => void;
+  onPublish?: () => void;
   savedText?: string;
 }
 
@@ -22,7 +23,7 @@ const columns: NonNullable<TableProps<SortieRow>['columns']> = [
  * 重叠率 / 航高 / 航速表单与 GSD、航线间距、预计张数的实时回算面板。
  * 被航线规划页（/missions/:id/route）与相机预设页（/settings/camera）消费。
  */
-export default function OverlapCalcPanel({ params, onChange, metrics, onSave, savedText }: OverlapCalcPanelProps) {
+export default function OverlapCalcPanel({ params, onChange, metrics, onSave, onPublish, savedText }: OverlapCalcPanelProps) {
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }} data-testid="overlap-calc-panel">
       <Card size="small" title="航线参数">
@@ -62,15 +63,25 @@ export default function OverlapCalcPanel({ params, onChange, metrics, onSave, sa
             <Slider min={0} max={180} value={params.heading} onChange={(v) => onChange({ heading: v })} />
           </Col>
         </Row>
-        {onSave ? (
+        {onSave || onPublish ? (
           <>
             <Divider style={{ margin: '10px 0' }} />
-            <Space>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
-                保存航线参数
-              </Button>
+            <Space wrap>
+              {onSave ? (
+                <Button icon={<SaveOutlined />} onClick={onSave}>
+                  保存航线参数
+                </Button>
+              ) : null}
+              {onPublish ? (
+                <Button type="primary" icon={<SaveOutlined />} onClick={onPublish}>
+                  发布版本
+                </Button>
+              ) : null}
               {savedText ? <Typography.Text type="secondary">{savedText}</Typography.Text> : null}
             </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              保存参数即核对版本并标记成果待复核；发布版本核对版本后 +1 并恢复导出。其他标签页已发布新版本时将被打回，不覆盖原内容。
+            </Typography.Text>
           </>
         ) : null}
       </Card>

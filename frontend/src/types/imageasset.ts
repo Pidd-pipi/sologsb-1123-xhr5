@@ -3,6 +3,9 @@ export type ImageQuality = '合格' | '模糊' | '过曝';
 
 export const IMAGE_QUALITIES: ImageQuality[] = ['合格', '模糊', '过曝'];
 
+/** 成果复核状态：航线参数/航点变更后标为待复核，重新确认后恢复 */
+export type ReviewStatus = 'confirmed' | 'pending';
+
 /** 成果影像条目 */
 export interface ImageAsset {
   id: string;
@@ -23,6 +26,8 @@ export interface ImageAsset {
   quality: ImageQuality;
   /** 归档目录 */
   folder: string;
+  /** 复核状态：航线参数/航点变更后为 pending，导出暂停 */
+  reviewStatus: ReviewStatus;
 }
 
 export type ImageAssetDraft = Omit<ImageAsset, 'id'>;

@@ -59,7 +59,7 @@ export default function MissionList() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [polygonText, setPolygonText] = useState(polygonToText(DEFAULT_POLYGON));
-  const [draft, setDraft] = useState<Omit<MissionDraft, 'areaPolygon'>>({
+  const [draft, setDraft] = useState<Omit<MissionDraft, 'areaPolygon' | 'version' | 'reviewPending' | 'routeUpdatedAt' | 'reviewConfirmedAt'>>({
     missionNo: '',
     name: '',
     areaName: '',

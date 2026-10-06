@@ -35,6 +35,14 @@ export interface Mission {
   pilot: string;
   status: MissionStatus;
   createdAt: number;
+  /** 聚合版本号：每发布一次 +1；老任务升级后补 0 */
+  version: number;
+  /** 航线参数/航点变更后，已编目成果是否待复核（导出暂停） */
+  reviewPending: boolean;
+  /** 最近一次航线参数/航点变更时间 */
+  routeUpdatedAt: number;
+  /** 最近一次复核确认时间 */
+  reviewConfirmedAt: number;
 }
 
 export type MissionDraft = Omit<Mission, 'id' | 'createdAt'>;

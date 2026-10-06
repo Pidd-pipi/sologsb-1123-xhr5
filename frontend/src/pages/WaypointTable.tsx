@@ -41,6 +41,7 @@ export default function WaypointTable() {
   const clearMission = useWaypointStore((s) => s.removeByMission);
 
   const mission = missions.find((m) => m.id === id);
+  const reviewPending = mission?.reviewPending ?? false;
   const rows = useMemo(
     () => waypoints.filter((w) => w.missionId === id).sort((a, b) => a.seq - b.seq),
     [waypoints, id],
@@ -235,6 +236,14 @@ export default function WaypointTable() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {reviewPending ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="航点已变更，成果导出已暂停"
+          description="已编目成果标为待复核，请到「成果编目」核对并重新确认后恢复导出。"
+        />
+      ) : null}
 
       <Row gutter={14}>
         <Col span={10}>
